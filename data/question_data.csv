@@ -1,4 +1,4 @@
-;text;option_1;option_2;option_3;option_4;N;Type;Order;Keywords
+question;text;option_1;option_2;option_3;option_4;N;Type;Order;Keywords
 q2;Breast implants?;more cool than pathetic;more pathetic than cool;;;24839;N;;"sex/intimacy; preference; opinion"
 q11;How does the idea of being slapped hard in the face during sex make you feel?;Horrified;Aroused;Nostalgic;Indifferent;28860;N;;sex/intimacy
 q12;Divide your age by 2.  Have you had sex with at least that many people?;Yes;No;;;22496;O;;sex/intimacy
@@ -2607,11 +2607,9 @@ d_offspring_current;Children;;;;;21812;;;
 d_bodytype;Body type;;;;;54897;;;
 d_job;Job;;;;;50565;;;
 d_orientation;Sexual orientation;;;;;66365;;;
-d_username;Username;;;;;66365;;;
 d_languages;Languages spoken;;;;;66352;;;
 d_relationship;Relationship;;;;;66365;;;
 d_offspring_desires;Children preferences;;;;;2329;;;
-d_city;City;;;;;66365;;;
 d_education_type;Education type;;;;;50923;;;
 d_religion_seriosity;Religion seriousness;;;;;27111;;;
 lf_want;Type of match;;;;;66365;;;
