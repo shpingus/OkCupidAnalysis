@@ -17,11 +17,9 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from tqdm.auto import tqdm
-from datetime import datetime
-
-# Machine learning imports
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error as mae
+from sklearn.metrics import r2_score
 
 # Deep learning imports
 import torch
@@ -36,6 +34,7 @@ import seaborn as sns
 
 # VoyageAI API
 import voyageai
+from voyageai import Client
 
 
 def setup_environment():
@@ -172,7 +171,7 @@ def prepare_features(csv, question_csv, sample_size=None):
 
 
 def generate_embeddings(texts, model="voyage-2", batch_size=20, cache_file=None):
-    """Generate embeddings for a list of texts using VoyageAI API or random vectors for testing."""
+    """Generate embeddings for a list of texts using VoyageAI API."""
     # Check if cache exists and load it
     if cache_file and os.path.exists(cache_file):
         print(f"Loading embeddings from cache: {cache_file}")
@@ -182,33 +181,45 @@ def generate_embeddings(texts, model="voyage-2", batch_size=20, cache_file=None)
     # Set embedding size based on model
     embedding_size = 1024 if model == "voyage-2" else 768
     
-    # Check if API key is set
-    api_key = os.getenv("VOYAGE_API_KEY")
-    if api_key and api_key != "your_api_key_here":
-        # Use the actual API if key is provided
-        all_embeddings = []
-        
-        # Process in batches to handle API rate limits
-        for i in tqdm(range(0, len(texts), batch_size), desc="Generating embeddings with API"):
-            batch = texts[i:i + batch_size]
-            try:
-                # Remove empty strings to avoid API errors
-                batch = [text if text.strip() else "unknown" for text in batch]
-                
-                # Call VoyageAI API
-                response = voyageai.embed(texts=batch, model=model)
-                batch_embeddings = response.embeddings
-                all_embeddings.extend(batch_embeddings)
-            except Exception as e:
-                print(f"Error in batch {i}-{i+batch_size}: {e}")
-                # Handle error by adding zero embeddings
-                zero_embeddings = [[0.0] * embedding_size for _ in range(len(batch))]
-                all_embeddings.extend(zero_embeddings)
-    else:
-        # Generate random embeddings for testing if no API key
-        print(f"No valid API key found. Generating random embeddings for testing...")
-        np.random.seed(42)  # For reproducibility
-        all_embeddings = [np.random.normal(0, 1, embedding_size).tolist() for _ in range(len(texts))]
+    # Use the VoyageAI API to generate embeddings
+    all_embeddings = []
+    
+    # Process in batches to handle API rate limits
+    for i in tqdm(range(0, len(texts), batch_size), desc="Generating embeddings with API"):
+        batch = texts[i:i + batch_size]
+        try:
+            # Remove empty strings to avoid API errors
+            batch = [text if text.strip() else "unknown" for text in batch]
+            
+                    # Call VoyageAI API using the correct function
+            # Check if API key exists before attempting to use API
+            if voyageai.api_key and voyageai.api_key != "your_api_key_here":
+                try:
+                    # Create client and use the recommended embed() method
+                    client = Client(api_key=voyageai.api_key)
+                    # Get embeddings through the client
+                    response = client.embed(
+                        texts=batch,
+                        model=model
+                    )
+                    # Extract embeddings from response
+                    batch_embeddings = response.embeddings
+                    
+                except Exception as e:
+                    print(f"API call failed: {str(e)}")
+                    # Generate random embeddings as fallback
+                    batch_embeddings = [np.random.randn(embedding_size).tolist() for _ in range(len(batch))]
+            else:
+                # If no valid API key, use random embeddings
+                print("No valid API key found. Generating random embeddings for testing...")
+                # Generate random embeddings of the correct size
+                batch_embeddings = [np.random.randn(embedding_size).tolist() for _ in range(len(batch))]
+            all_embeddings.extend(batch_embeddings)
+        except Exception as e:
+            print(f"Error in batch {i}-{i+batch_size}: {e}")
+            # Handle error by adding zero embeddings
+            zero_embeddings = [[0.0] * embedding_size for _ in range(len(batch))]
+            all_embeddings.extend(zero_embeddings)
     
     # Cache embeddings to avoid regenerating them
     if cache_file:
@@ -390,11 +401,122 @@ def train_model(model, train_loader, test_loader, device, model_save_path="best_
     return train_losses, val_losses, model
 
 
+def calculate_accuracy_metrics(y_true, y_pred, save_path=None):
+    """Calculate age prediction accuracy metrics."""
+    # Calculate absolute errors
+    abs_errors = np.abs(y_pred - y_true)
+    
+    # Calculate percentage within different thresholds
+    within_1_year = np.mean(abs_errors <= 1) * 100
+    within_3_years = np.mean(abs_errors <= 3) * 100
+    within_5_years = np.mean(abs_errors <= 5) * 100
+    
+    # Calculate R² score
+    r2 = r2_score(y_true, y_pred)
+    
+    # Calculate MAE
+    error = mae(y_true, y_pred)
+    
+    metrics = {
+        'within_1_year': within_1_year,
+        'within_3_years': within_3_years, 
+        'within_5_years': within_5_years,
+        'r2_score': r2,
+        'mae': error
+    }
+    
+    print(f"Accuracy Metrics:")
+    print(f"  Mean Absolute Error: {error:.2f} years")
+    print(f"  Predictions within ±1 year: {within_1_year:.2f}%")
+    print(f"  Predictions within ±3 years: {within_3_years:.2f}%")
+    print(f"  Predictions within ±5 years: {within_5_years:.2f}%")
+    print(f"  R² score: {r2:.4f}")
+    
+    # Save metrics to file if path is provided
+    if save_path:
+        with open(save_path, 'w') as f:
+            f.write("Accuracy Metrics:\n")
+            f.write(f"  Mean Absolute Error: {error:.2f} years\n")
+            f.write(f"  Predictions within ±1 year: {within_1_year:.2f}%\n")
+            f.write(f"  Predictions within ±3 years: {within_3_years:.2f}%\n")
+            f.write(f"  Predictions within ±5 years: {within_5_years:.2f}%\n")
+            f.write(f"  R² score: {r2:.4f}\n")
+        print(f"Accuracy metrics saved to {save_path}")
+    
+    return metrics
+
+def create_true_vs_predicted_plot(y_true, y_pred, mean_age, save_path):
+    """Create plot of true ages vs predicted ages with mean age line."""
+    # Plot predictions vs actual ages for a sample
+    sample_size = min(100, len(y_true))
+    sample_indices = np.random.choice(len(y_true), sample_size, replace=False)
+    
+    sample_y = y_true[sample_indices]
+    sample_pred = y_pred[sample_indices]
+    
+    # Calculate MAE
+    error = mae(y_true, y_pred)
+    
+    # Create figure with two subplots side by side
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 6))
+    
+    # SUBPLOT 1: Line plot showing sorted ages
+    # Sort by actual age for better visualization
+    sort_idx = np.argsort(sample_y)
+    sorted_y = sample_y[sort_idx]
+    sorted_pred = sample_pred[sort_idx]
+    
+    # Create explicit x-axis with integers
+    x_indices = np.arange(len(sorted_y))
+    
+    # Plot actual and predicted ages with explicit integer indices
+    ax1.plot(x_indices, sorted_y, 'o-', label='Actual Age')
+    ax1.plot(x_indices, sorted_pred, 'x-', label='Predicted Age')
+    
+    # Add horizontal line for mean age
+    ax1.axhline(y=mean_age, color='g', linestyle='--', label=f'Mean Age: {mean_age:.2f}')
+    
+    ax1.set_title('True vs Predicted Ages (sorted by true age)')
+    ax1.set_xlabel('Sample Index (sorted by actual age)')
+    ax1.set_ylabel('Age')
+    ax1.grid(True)
+    ax1.legend()
+    
+    # Set x-axis to show integer ticks only
+    ax1.set_xticks(x_indices[::5])  # Show every 5th tick to avoid overcrowding
+    
+    # SUBPLOT 2: Scatter plot of True vs Predicted ages
+    ax2.scatter(sample_y, sample_pred, alpha=0.6)
+    
+    # Add diagonal line for perfect predictions
+    min_age = min(min(sample_y), min(sample_pred))
+    max_age = max(max(sample_y), max(sample_pred))
+    ax2.plot([min_age, max_age], [min_age, max_age], 'r--', label='Perfect Prediction')
+    
+    # Add horizontal line for mean predictions
+    ax2.axhline(y=mean_age, color='g', linestyle='--', label=f'Mean Age: {mean_age:.2f}')
+    
+    ax2.set_title(f'True vs Predicted Ages (MAE: {error:.2f} years)')
+    ax2.set_xlabel('True Age')
+    ax2.set_ylabel('Predicted Age')
+    ax2.grid(True)
+    ax2.legend()
+    
+    # Make the plot look nicer
+    plt.tight_layout()
+    
+    plt.savefig(save_path)
+    print(f"True vs Predicted Ages plot saved to {save_path}")
+    plt.close()
+    
+    return error
+
 def plot_training_history(train_losses, val_losses, save_path=None):
     """Plot the training and validation loss history."""
     plt.figure(figsize=(10, 6))
-    plt.plot(train_losses, label='Train Loss')
-    plt.plot(val_losses, label='Validation Loss')
+    epochs = range(1, len(train_losses) + 1)
+    plt.plot(epochs, train_losses, label='Train Loss')
+    plt.plot(epochs, val_losses, label='Validation Loss')
     plt.title('Training History')
     plt.xlabel('Epoch')
     plt.ylabel('Loss (MAE)')
@@ -405,12 +527,12 @@ def plot_training_history(train_losses, val_losses, save_path=None):
         plt.savefig(save_path)
         print(f"Training history plot saved to {save_path}")
     
-    # Only show plots interactively when not running in script mode
-    # plt.show()
     plt.close()
+    
+    return
 
 
-def evaluate_model(model, X, y, name="Model", save_dir=None):
+def evaluate_model(model, X, y, name="Model", results_dir=None):
     """Evaluate model performance with visualizations."""
     # Make predictions
     predictions = model.predict(X)
@@ -419,61 +541,24 @@ def evaluate_model(model, X, y, name="Model", save_dir=None):
     error = mae(y, predictions)
     print(f"{name} MAE: {error:.2f} years")
     
-    # Plot predictions vs actual ages for a sample
-    sample_size = min(100, len(y))
-    sample_indices = np.random.choice(len(y), sample_size, replace=False)
-    
-    sample_y = y[sample_indices]
-    sample_pred = predictions[sample_indices]
-    
-    plt.figure(figsize=(12, 6))
-    
-    # Sort by actual age for better visualization
-    sort_idx = np.argsort(sample_y)
-    sample_y = sample_y[sort_idx]
-    sample_pred = sample_pred[sort_idx]
-    
-    plt.plot(sample_y, 'o-', label='Actual Age')
-    plt.plot(sample_pred, 'x-', label='Predicted Age')
-    plt.title(f'{name} Predictions vs Actual Ages (MAE: {error:.2f})')
-    plt.xlabel('Sample Index (sorted by actual age)')
-    plt.ylabel('Age')
-    plt.grid(True)
-    plt.legend()
-    
-    if save_dir:
-        plot_path = os.path.join(save_dir, f"{name.lower().replace(' ', '_')}_predictions.png")
-        plt.savefig(plot_path)
-        print(f"Predictions plot saved to {plot_path}")
-    
-    # plt.show()
-    plt.close()
-    
-    # Plot error distribution
-    errors = predictions - y
-    plt.figure(figsize=(10, 6))
-    sns.histplot(errors, kde=True)
-    plt.title(f'{name} Error Distribution')
-    plt.xlabel('Prediction Error (years)')
-    plt.ylabel('Frequency')
-    plt.grid(True)
-    plt.axvline(0, color='red', linestyle='--')
-    
-    if save_dir:
-        error_path = os.path.join(save_dir, f"{name.lower().replace(' ', '_')}_error_dist.png")
-        plt.savefig(error_path)
-        print(f"Error distribution plot saved to {error_path}")
-    
-    # plt.show()
-    plt.close()
+    if results_dir:
+        # Calculate mean age for reference line
+        mean_age = np.mean(y)
+        
+        # Create paths for plots and metrics
+        true_vs_pred_path = os.path.join(results_dir, "simple_voyageapi_embedding_model_TrueAgeVSPredictedAge.png")
+        metrics_path = os.path.join(results_dir, "simple_voyageapi_embedding_model_accuracy.txt")
+        
+        # Create plot and save metrics
+        create_true_vs_predicted_plot(y, predictions, mean_age, true_vs_pred_path)
+        calculate_accuracy_metrics(y, predictions, metrics_path)
     
     return error
 
 
 def analyze_feature_importance(essay_embeddings, demographic_embeddings, question_embeddings, 
-                              X_train, y_train, X_test, y_test, device, save_dir=None):
+                              X_train, y_train, X_test, y_test, device, results_dir=None):
     """Analyze which embedding types contribute most to predictions."""
-    
     # Function to evaluate model with only certain embedding types
     def evaluate_partial_embeddings(embedding_type):
         """Train and evaluate a model with only certain types of embeddings."""
@@ -541,23 +626,9 @@ def analyze_feature_importance(essay_embeddings, demographic_embeddings, questio
     results_df = pd.DataFrame(list(results.items()), columns=['Features', 'MAE'])
     results_df = results_df.sort_values('MAE')
     
-    # Plot results
-    plt.figure(figsize=(12, 6))
-    sns.barplot(x='Features', y='MAE', data=results_df, palette='viridis')
-    plt.title('Feature Importance: MAE for Different Feature Combinations')
-    plt.xlabel('Feature Set')
-    plt.ylabel('Mean Absolute Error (years)')
-    plt.grid(True, axis='y')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    
-    if save_dir:
-        importance_path = os.path.join(save_dir, "feature_importance.png")
-        plt.savefig(importance_path)
-        print(f"Feature importance plot saved to {importance_path}")
-    
-    # plt.show()
-    plt.close()
+    # Save results directly
+    if results_dir:
+        results_df.to_csv(os.path.join(results_dir, "feature_importance.csv"), index=False)
     
     print(f"Best feature set: {results_df.iloc[0]['Features']} with MAE: {results_df.iloc[0]['MAE']:.2f} years")
     
@@ -569,11 +640,10 @@ def main(args):
     # Setup environment
     device = setup_environment()
     
-    # Create output directory for results
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"results_{timestamp}"
-    os.makedirs(output_dir, exist_ok=True)
-    print(f"Results will be saved to {output_dir}")
+    # Create fixed results directory
+    results_dir = "results"
+    os.makedirs(results_dir, exist_ok=True)
+    print(f"Results will be saved to {results_dir}")
     
     # Load and prepare data
     csv_data, question_data = load_data(args.data_path, args.question_data_path)
@@ -612,7 +682,7 @@ def main(args):
     model = EmbeddingAgePredictor(input_size).to(device)
     
     # Train model
-    model_save_path = os.path.join(output_dir, "best_embedding_age_model.pth")
+    model_save_path = os.path.join(results_dir, "simple_voyageapi_embedding_model.pth")
     train_losses, val_losses, trained_model = train_model(
         model, train_loader, test_loader, device, 
         model_save_path=model_save_path,
@@ -621,11 +691,11 @@ def main(args):
     )
     
     # Plot training history
-    history_plot_path = os.path.join(output_dir, "training_history.png")
+    history_plot_path = os.path.join(results_dir, "simple_voyageapi_embedding_model_lossVSepoch.png")
     plot_training_history(train_losses, val_losses, save_path=history_plot_path)
     
     # Evaluate model
-    model_error = evaluate_model(trained_model, X_test, y_test, "VoyageAPI Embedding Model", save_dir=output_dir)
+    model_error = evaluate_model(trained_model, X_test, y_test, "VoyageAPI Embedding Model", results_dir=results_dir)
     
     # Compare with baseline (mean prediction)
     class MeanBaseline:
@@ -636,7 +706,7 @@ def main(args):
             return np.full(len(X), self.mean_age)
     
     baseline = MeanBaseline(y_train)
-    baseline_error = evaluate_model(baseline, X_test, y_test, "Mean Baseline", save_dir=output_dir)
+    baseline_error = evaluate_model(baseline, X_test, y_test, "Mean Baseline")
     
     # Calculate improvement
     improvement = (baseline_error - model_error) / baseline_error * 100
@@ -647,20 +717,17 @@ def main(args):
         print("\nAnalyzing feature importance...")
         results_df = analyze_feature_importance(
             essay_embeddings, demographic_embeddings, question_embeddings,
-            X_train, y_train, X_test, y_test, device, save_dir=output_dir
+            X_train, y_train, X_test, y_test, device, results_dir=results_dir
         )
-        
-        # Save feature importance results
-        results_df.to_csv(os.path.join(output_dir, "feature_importance.csv"), index=False)
     
-    print(f"\nAll results have been saved to {output_dir}")
+    print(f"\nAll results have been saved to {results_dir}")
     
     return {
         'model_error': model_error,
         'baseline_error': baseline_error,
         'improvement': improvement,
         'model_path': model_save_path,
-        'output_dir': output_dir
+        'results_dir': results_dir
     }
 
 

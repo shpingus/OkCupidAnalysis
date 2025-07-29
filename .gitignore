@@ -1,4 +1,9 @@
 /Dating/
 /okcupid_env/
 /OKCupid. Kirkegaard and Bjerrekær. 2016/
-/.Ds_Store
+.DS_Store
+/results/
+.env
+/extract_7z.py
+/data/user_data_public.csv
+/cache
