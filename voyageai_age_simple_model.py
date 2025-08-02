@@ -236,25 +236,28 @@ def create_embeddings_for_users(valid_users, cache_dir="cache", model="voyage-2"
     # Create cache directory
     os.makedirs(cache_dir, exist_ok=True)
     
+    # Get sample size for cache filename
+    sample_size = len(valid_users)
+    
     # Generate embeddings for essays
     essay_embeddings = generate_embeddings(
         valid_users['combined_essays'].tolist(),
         model=model,
-        cache_file=f"{cache_dir}/essay_embeddings.pkl"
+        cache_file=f"{cache_dir}/essay_embeddings_{sample_size}.pkl"
     )
     
     # Generate embeddings for demographics
     demographic_embeddings = generate_embeddings(
         valid_users['combined_demographics'].tolist(),
         model=model,
-        cache_file=f"{cache_dir}/demographic_embeddings.pkl"
+        cache_file=f"{cache_dir}/demographic_embeddings_{sample_size}.pkl"
     )
     
     # Generate embeddings for question responses
     question_embeddings = generate_embeddings(
         valid_users['question_responses'].tolist(),
         model=model,
-        cache_file=f"{cache_dir}/question_embeddings.pkl"
+        cache_file=f"{cache_dir}/question_embeddings_{sample_size}.pkl"
     )
     
     # Verify embedding dimensions
@@ -511,6 +514,41 @@ def create_true_vs_predicted_plot(y_true, y_pred, mean_age, save_path):
     
     return error
 
+
+def plot_error_distribution(y_true, y_pred, save_path):
+    """Create and save a histogram of prediction errors."""
+    # Calculate prediction errors
+    errors = y_pred - y_true
+    
+    # Create figure
+    plt.figure(figsize=(12, 6))
+    
+    # Plot histogram with density curve
+    sns.histplot(errors, kde=True, bins=30)
+    
+    # Add vertical line for perfect prediction (error = 0)
+    plt.axvline(x=0, color='r', linestyle='--', label='Perfect Prediction')
+    
+    # Add vertical line for mean error
+    mean_error = np.mean(errors)
+    plt.axvline(x=mean_error, color='g', linestyle='--', 
+                label=f'Mean Error: {mean_error:.2f} years')
+    
+    # Add labels and title
+    plt.title('Distribution of Prediction Errors')
+    plt.xlabel('Prediction Error (Predicted Age - True Age)')
+    plt.ylabel('Frequency')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    
+    # Make the plot look nicer
+    plt.tight_layout()
+    
+    # Save and close
+    plt.savefig(save_path)
+    print(f"Error distribution plot saved to {save_path}")
+    plt.close()
+
 def plot_training_history(train_losses, val_losses, save_path=None):
     """Plot the training and validation loss history."""
     plt.figure(figsize=(10, 6))
@@ -548,10 +586,12 @@ def evaluate_model(model, X, y, name="Model", results_dir=None):
         # Create paths for plots and metrics
         true_vs_pred_path = os.path.join(results_dir, "simple_voyageapi_embedding_model_TrueAgeVSPredictedAge.png")
         metrics_path = os.path.join(results_dir, "simple_voyageapi_embedding_model_accuracy.txt")
+        error_dist_path = os.path.join(results_dir, "simple_voyageapi_error_distribution.png")
         
-        # Create plot and save metrics
+        # Create plots and save metrics
         create_true_vs_predicted_plot(y, predictions, mean_age, true_vs_pred_path)
         calculate_accuracy_metrics(y, predictions, metrics_path)
+        plot_error_distribution(y, predictions, error_dist_path)
     
     return error
 
