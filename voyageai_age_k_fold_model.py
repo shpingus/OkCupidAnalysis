@@ -659,6 +659,85 @@ def plot_k_fold_training_history(fold_metrics, results_dir):
     print(f"K-fold training history plot saved to {save_path}")
     plt.close()
     
+    # Plot ensemble loss vs epoch as a separate visualization
+    plot_ensemble_loss_vs_epoch(fold_metrics, results_dir)
+    
+    return
+
+
+def plot_ensemble_loss_vs_epoch(fold_metrics, results_dir):
+    """
+    Plot the average training and validation loss versus epoch.
+    This shows how the models perform during training across all folds.
+    """
+    plt.figure(figsize=(12, 8))
+    
+    # Find the maximum number of epochs across all folds
+    max_epochs = max([len(fold['train_losses']) for fold in fold_metrics])
+    epochs = range(1, max_epochs + 1)
+    
+    # Prepare arrays for averaging
+    avg_train_losses = []
+    avg_val_losses = []
+    
+    # Calculate average training and validation losses at each epoch
+    for epoch in epochs:
+        epoch_train_losses = []
+        epoch_val_losses = []
+        
+        # Collect losses from each fold for this epoch
+        for fold_data in fold_metrics:
+            train_losses = fold_data['train_losses']
+            val_losses = fold_data['val_losses']
+            
+            if epoch <= len(train_losses):
+                epoch_train_losses.append(train_losses[epoch-1])
+            
+            if epoch <= len(val_losses):
+                epoch_val_losses.append(val_losses[epoch-1])
+        
+        # Calculate average losses for this epoch
+        if epoch_train_losses:
+            avg_train_losses.append(np.mean(epoch_train_losses))
+        
+        if epoch_val_losses:
+            avg_val_losses.append(np.mean(epoch_val_losses))
+    
+    # Plot average training loss
+    plt.plot(epochs[:len(avg_train_losses)], avg_train_losses, 
+             '-o', color='blue', label='Average Training Loss', alpha=0.7)
+    
+    # Plot average validation loss
+    plt.plot(epochs[:len(avg_val_losses)], avg_val_losses, 
+             '-o', color='red', label='Average Validation Loss', alpha=0.7)
+    
+    # Mark best average validation performance
+    best_epoch = np.argmin(avg_val_losses) + 1
+    best_loss = np.min(avg_val_losses)
+    plt.plot(best_epoch, best_loss, 'r*', markersize=12, 
+             label=f'Best Validation: {best_loss:.4f} @ epoch {best_epoch}')
+    
+    # Add labels, title, and legend
+    plt.title('Average Training and Validation Loss vs Epoch')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss (MAE)')
+    plt.legend()
+    plt.grid(True)
+    
+    # Add text annotation for best performance
+    plt.annotate(f'Best: {best_loss:.4f}',
+                xy=(best_epoch, best_loss),
+                xytext=(best_epoch + 1, best_loss + 0.2),
+                arrowprops=dict(facecolor='black', shrink=0.05, width=1.5),
+                fontsize=12)
+    
+    # Save figure
+    save_path = os.path.join(results_dir, "ensemble_loss_vs_epoch.png")
+    plt.tight_layout()
+    plt.savefig(save_path)
+    print(f"Ensemble loss vs epoch plot saved to {save_path}")
+    plt.close()
+    
     return
 
 

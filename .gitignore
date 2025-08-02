@@ -7,3 +7,5 @@
 /extract_7z.py
 /data/user_data_public.csv
 /cache
+/first_simle_model_results/
+/first_k_fold_results/
