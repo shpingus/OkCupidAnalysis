@@ -1,0 +1,6 @@
+Accuracy Metrics:
+  Mean Absolute Error: 5.22 years
+  Predictions within ±1 year: 15.30%
+  Predictions within ±3 years: 40.40%
+  Predictions within ±5 years: 61.20%
+  R² score: 0.1592

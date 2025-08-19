@@ -390,7 +390,7 @@ def train_model(model, train_loader, val_loader, device, model_save_path,
     return train_losses, val_losses, model, best_val_loss
 
 
-def train_k_fold_models(X, y, device, results_dir="results", n_splits=5, 
+def train_k_fold_models(X, y, device, results_dir="not_enhanced_models_results", n_splits=5, 
                         batch_size=32, num_epochs=50, patience=10):
     """Train models using k-fold cross-validation."""
     # Create KFold object
@@ -956,7 +956,7 @@ def main(args):
     device = setup_environment()
     
     # Create fixed results directory
-    results_dir = "results"
+    results_dir = "not_enhanced_models_results"
     os.makedirs(results_dir, exist_ok=True)
     print(f"Results will be saved to {results_dir}")
     

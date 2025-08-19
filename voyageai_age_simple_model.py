@@ -652,7 +652,7 @@ def main(args):
     device = setup_environment()
     
     # Create fixed results directory
-    results_dir = "results"
+    results_dir = "not_enhanced_models_results"
     os.makedirs(results_dir, exist_ok=True)
     print(f"Results will be saved to {results_dir}")
     

@@ -100,8 +100,13 @@ The intuition behind this approach is:
 These operations effectively enrich the feature space, providing the model with much deeper information about relationships between different data types, which helps explain the improved R² score observed in the enhanced models.
 
 ## 5. Results Analysis
-
-According to our model comparison report, all four models achieved relatively close results, with MAE scores ranging from 5.20 to 5.23 years. Similarly, the accuracy within ±5 years is remarkably consistent, ranging from 59.8% to 61.1% across all models, suggesting a fundamental limit to prediction precision with the available features. Here's how they compare:
+After analyzing the performance of all four models across multiple metrics, we can see that each model has particular
+strengths. The Enhanced Simple Model achieves the best overall performance with the lowest Mean Absolute Error (5.20 years) and highest R² score (0.1843), showing an 11.76% improvement in explanatory power over the Simple Model. While
+the Simple Model performs better on the accuracy thresholds (±1, ±3, and ±5 years), the differences are relatively small.
+The Enhanced K-Fold Model consistently outperforms the regular K-Fold Model across all metrics except MAE, where they
+are tied. Based on this comprehensive analysis, the Enhanced Simple Model is deemed the most effective overall, as it
+provides the best balance between low error (MAE) and high explanatory power (R²), which are typically considered the
+most important statistical metrics for regression tasks.
 
 | Model | MAE (years) ↓ | R² Score ↑ | ±1 year (%) ↑ | ±3 years (%) ↑ | ±5 years (%) ↑ |
 | ----- | ------------ | ---------- | ------------- | -------------- | -------------- |
@@ -109,8 +114,6 @@ According to our model comparison report, all four models achieved relatively cl
 | Kfold Model | 5.23 | 0.1613 | 15.0% | 38.9% | 60.8% |
 | Enhanced Simple Model | 5.20 | 0.1843 | 14.1% | 39.6% | 59.8% |
 | Enhanced Kfold Model | 5.23 | 0.1661 | 15.5% | 39.7% | 61.0% |
-
-**The Enhanced Simple Model emerges as the best performer overall**, with the lowest MAE (5.20 years) and highest R² score (0.1843). However, the un-enhanced simple Model actually performed better on accuracy within specific year thresholds.
 
 ### Surprising Results and Explanations
 
@@ -126,7 +129,7 @@ All models reached very similar results, with MAE differences of less than 0.03 
 
 To run this project, you'll need:
 
-1. **Python Virtual Environment**:
+1. **Python Virtual Environment**: (Recommended)
    ```bash
    # Create virtual environment
    python -m venv okcupid_env
@@ -165,19 +168,19 @@ All models accept similar command line parameters:
 
 1. **Simple Model**:
    ```bash
-   python voyageai_age_simple_model.py --sample_size 5000
+   python voyageai_age_simple_model.py --sample_size 5000 --batch_size 64 --epochs 50
    ```
-   Results will be saved to the `results/` directory.
+   Results will be saved to the `not_enhanced_models_results/` directory.
 
 2. **K-Fold Model**:
    ```bash
-   python voyageai_age_k_fold_model.py --sample_size 5000
+   python voyageai_age_k_fold_model.py --sample_size 5000 --batch_size 64 --epochs 50
    ```
-   Results will be saved to the `results/` directory.
+   Results will be saved to the `not_enhanced_models_results/` directory.
 
 3. **Enhanced Simple Model**:
    ```bash
-   python voyageai_age_enhanced_simple_model.py --sample_size 5000
+   python voyageai_age_enhanced_simple_model.py --sample_size 5000 --batch_size 64 --epochs 50
    ```
    Results will be saved to the `enhanced_models_results/` directory.
 
@@ -203,18 +206,12 @@ After running the models, you can view the comparison results:
    xdg-open model_comparisons/model_comparison_report.html
    ```
    
-2. **Alternative: Using Python's HTTP server**:
-   ```bash
-   python -m http.server
-   ```
-   Then navigate to `http://localhost:8000/model_comparisons/model_comparison_report.html` in your browser.
-
-3. **View comparison plots directly**:
+2. **View comparison plots directly**:
    ```bash
    open model_comparisons/all_models_comparison.png
    ```
 
-You can also examine the individual model results in their respective output directories (`results/` and `enhanced_models_results/`).
+You can also examine the individual model results in their respective output directories (`not_enhanced_models_results/` and `enhanced_models_results/`).
 
 To generate a new comparison report after running models:
 ```bash
@@ -234,7 +231,7 @@ OkCupidAnalysis/
 │   ├── model_comparison_report.md     # Markdown version of report
 │   └── */                             # Pairwise comparison folders
 ├── enhanced_models_results/           # Results from enhanced models
-├── results/                           # Results from basic models
+├── not_enhanced_models_results/       # Results from basic models
 ├── voyageai_age_simple_model.py       # Simple model implementation
 ├── voyageai_age_k_fold_model.py       # K-fold ensemble model
 ├── voyageai_age_enhanced_simple_model.py    # Enhanced simple model

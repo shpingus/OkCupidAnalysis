@@ -1,0 +1,17 @@
+K-Fold Ensemble Age Prediction Model Summary
+===============================================
+
+Dataset Size: 5000 users
+Number of Folds: 5
+Test Set Size: 1000 users
+
+Ensemble Test MAE: 5.21 years
+Baseline Test MAE: 6.06 years
+Improvement: 13.91%
+
+Individual Fold Test MAE:
+  Fold 1: 5.23 years
+  Fold 2: 5.28 years
+  Fold 3: 5.23 years
+  Fold 4: 5.23 years
+  Fold 5: 5.22 years
