@@ -2,7 +2,6 @@
 /okcupid_env/
 /OKCupid. Kirkegaard and Bjerrekær. 2016/
 .DS_Store
-/results/
 .env
 /extract_7z.py
 /data/user_data_public.csv
@@ -10,4 +9,3 @@
 /first_simle_model_results/
 /first_k_fold_results/
 /other_project_files/
-/enhanced_models_results/

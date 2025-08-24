@@ -102,10 +102,6 @@ def load_data(data_path, question_data_path, sample_size=None):
 
 def prepare_features(csv, question_csv, sample_size=None):
     """Extract and prepare text features from the dataset."""
-    # Get essay columns (free-form text fields)
-    essay_columns = [col for col in csv.columns if col.startswith('essay')]
-    print(f"Found {len(essay_columns)} essay columns")
-    
     # Define possible demographic columns
     all_demographic_columns = [
         'd_body_type', 'd_diet', 'd_drinks', 'd_drugs', 'd_education', 
@@ -130,13 +126,6 @@ def prepare_features(csv, question_csv, sample_size=None):
     if sample_size:
         valid_users = valid_users.sample(sample_size, random_state=42)
     print(f"Working with {len(valid_users)} users")
-    
-    # Combine essays into a single text field
-    if essay_columns:
-        valid_users['combined_essays'] = valid_users[essay_columns].fillna("").astype(str).agg(' '.join, axis=1).apply(clean_text)
-    else:
-        print("Warning: No essay columns found. Using empty strings.")
-        valid_users['combined_essays'] = ""
     
     # Combine demographic information
     if demographic_columns:
@@ -163,7 +152,6 @@ def prepare_features(csv, question_csv, sample_size=None):
         valid_users['question_responses'] = ""
     
     # Display statistics about our text features
-    print(f"Average essay length: {valid_users['combined_essays'].apply(len).mean():.0f} characters")
     print(f"Average demographics length: {valid_users['combined_demographics'].apply(len).mean():.0f} characters")
     print(f"Average question responses length: {valid_users['question_responses'].apply(len).mean():.0f} characters")
     
@@ -239,13 +227,6 @@ def create_embeddings_for_users(valid_users, cache_dir="cache", model="voyage-2"
     # Get sample size for cache filename
     sample_size = len(valid_users)
     
-    # Generate embeddings for essays
-    essay_embeddings = generate_embeddings(
-        valid_users['combined_essays'].tolist(),
-        model=model,
-        cache_file=f"{cache_dir}/essay_embeddings_{sample_size}.pkl"
-    )
-    
     # Generate embeddings for demographics
     demographic_embeddings = generate_embeddings(
         valid_users['combined_demographics'].tolist(),
@@ -261,11 +242,10 @@ def create_embeddings_for_users(valid_users, cache_dir="cache", model="voyage-2"
     )
     
     # Verify embedding dimensions
-    print(f"Essay embeddings shape: {len(essay_embeddings)} x {len(essay_embeddings[0])}")
     print(f"Demographic embeddings shape: {len(demographic_embeddings)} x {len(demographic_embeddings[0])}")
     print(f"Question embeddings shape: {len(question_embeddings)} x {len(question_embeddings[0])}")
     
-    return essay_embeddings, demographic_embeddings, question_embeddings
+    return demographic_embeddings, question_embeddings
 
 
 class EmbeddingDataset(Dataset):
@@ -596,26 +576,18 @@ def evaluate_model(model, X, y, name="Model", results_dir=None):
     return error
 
 
-def analyze_feature_importance(essay_embeddings, demographic_embeddings, question_embeddings, 
+def analyze_feature_importance(demographic_embeddings, question_embeddings, 
                               X_train, y_train, X_test, y_test, device, results_dir=None):
     """Analyze which embedding types contribute most to predictions."""
     # Function to evaluate model with only certain embedding types
     def evaluate_partial_embeddings(embedding_type):
         """Train and evaluate a model with only certain types of embeddings."""
-        if embedding_type == 'essays':
-            X_partial = np.array(essay_embeddings)
-        elif embedding_type == 'demographics':
+        if embedding_type == 'demographics':
             X_partial = np.array(demographic_embeddings)
         elif embedding_type == 'questions':
             X_partial = np.array(question_embeddings)
-        elif embedding_type == 'essays+demographics':
-            X_partial = np.hstack([essay_embeddings, demographic_embeddings])
-        elif embedding_type == 'essays+questions':
-            X_partial = np.hstack([essay_embeddings, question_embeddings])
         elif embedding_type == 'demographics+questions':
             X_partial = np.hstack([demographic_embeddings, question_embeddings])
-        elif embedding_type == 'all':
-            X_partial = np.hstack([essay_embeddings, demographic_embeddings, question_embeddings])
         else:
             raise ValueError(f"Unknown embedding type: {embedding_type}")
         
@@ -649,8 +621,7 @@ def analyze_feature_importance(essay_embeddings, demographic_embeddings, questio
 
     # Analyze contribution of different embedding types
     embedding_types = [
-        'essays', 'demographics', 'questions', 
-        'essays+demographics', 'essays+questions', 'demographics+questions', 'all'
+        'demographics', 'questions', 'demographics+questions'
     ]
     
     # Record results in a dictionary
@@ -681,7 +652,7 @@ def main(args):
     device = setup_environment()
     
     # Create fixed results directory
-    results_dir = "results"
+    results_dir = "not_enhanced_models_results"
     os.makedirs(results_dir, exist_ok=True)
     print(f"Results will be saved to {results_dir}")
     
@@ -690,13 +661,12 @@ def main(args):
     valid_users, selected_questions = prepare_features(csv_data, question_data, args.sample_size)
     
     # Generate embeddings
-    essay_embeddings, demographic_embeddings, question_embeddings = create_embeddings_for_users(
+    demographic_embeddings, question_embeddings = create_embeddings_for_users(
         valid_users, cache_dir=args.cache_dir, model=args.embedding_model
     )
     
     # Combine embeddings into feature matrix
     X = np.hstack([
-        essay_embeddings,
         demographic_embeddings,
         question_embeddings
     ])
@@ -756,7 +726,7 @@ def main(args):
     if args.feature_analysis:
         print("\nAnalyzing feature importance...")
         results_df = analyze_feature_importance(
-            essay_embeddings, demographic_embeddings, question_embeddings,
+            demographic_embeddings, question_embeddings,
             X_train, y_train, X_test, y_test, device, results_dir=results_dir
         )
     

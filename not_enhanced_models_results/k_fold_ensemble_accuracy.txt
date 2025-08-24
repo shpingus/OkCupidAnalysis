@@ -1,0 +1,6 @@
+K-Fold Ensemble Accuracy Metrics:
+  Mean Absolute Error: 5.21 years
+  Predictions within ±1 year: 14.60%
+  Predictions within ±3 years: 40.60%
+  Predictions within ±5 years: 60.40%
+  R² score: 0.1742
