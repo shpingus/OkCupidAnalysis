@@ -34,8 +34,8 @@ This analysis is part of the OkCupid Age Prediction project, where we use machin
 **Age Groups Defined:**
 - Young Adults: 18-25 years
 - Adults: 26-35 years  
-- Middle-aged: 36-50 years
-- Older Adults: 50+ years
+- Middle-aged: 36-45 years
+- Older Adults: 46-60 years
 
 ### Step 2: Specify Your Null Distribution
 
@@ -57,7 +57,7 @@ Expected Frequency = (Row Total × Column Total) / Grand Total
 **Our Observational Study Design:**
 1. Load OkCupid user dataset with age and q77 response data
 2. Filter users with valid ages (18-80) and valid alcohol responses
-3. Create age group categories: 18-25, 26-35, 36-50, 50+
+3. Create age group categories: 18-25, 26-35, 36-45, 46-60
 4. Map q77 numeric responses to descriptive labels
 5. Construct 4×4 contingency table with observed frequencies
 6. Calculate row totals, column totals, and grand total
@@ -65,8 +65,8 @@ Expected Frequency = (Row Total × Column Total) / Grand Total
 **Expected Pattern if H₁ is True:**
 - **Young Adults (18-25):** Higher percentages of "Very often" and "Sometimes"
 - **Adults (26-35):** Peak "Sometimes", declining "Very often"
-- **Middle-aged (36-50):** Gradual shift toward "Rarely"
-- **Older Adults (50+):** Highest percentages of "Never" and "Rarely"
+- **Middle-aged (36-45):** Gradual shift toward "Rarely"
+- **Older Adults (46-60):** Highest percentages of "Never" and "Rarely"
 
 ### Step 4: Calculate the P-value
 

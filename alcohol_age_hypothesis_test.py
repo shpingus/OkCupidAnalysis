@@ -88,10 +88,10 @@ def create_age_groups(df):
             return '18-25'
         elif 26 <= age <= 35:
             return '26-35'
-        elif 36 <= age <= 50:
-            return '36-50'
-        elif age > 50:
-            return '50+'
+        elif 36 <= age <= 45:
+            return '36-45'
+        elif 46 <= age <= 60:
+            return '46-60'
         else:
             return 'Other'
     
@@ -146,7 +146,7 @@ def create_contingency_table(df):
     contingency_table = contingency_table[column_order]
     
     # Reorder rows for age progression
-    row_order = ['18-25', '26-35', '36-50', '50+', 'Total']
+    row_order = ['18-25', '26-35', '36-45', '46-60', 'Total']
     contingency_table = contingency_table.reindex(row_order)
     
     print("\nContingency Table (Observed Frequencies):")
