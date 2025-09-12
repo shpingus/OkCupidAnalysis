@@ -1,0 +1,28 @@
+STATISTICAL HYPOTHESIS TESTING RESULTS
+==================================================
+
+Research Question: Does alcohol consumption frequency decrease with age?
+Database Question: q77 - 'How frequently do you drink alcohol?'
+Sample Size: 51,343 OkCupid users
+
+HYPOTHESES:
+H₀: Age and alcohol consumption are independent
+H₁: Alcohol consumption frequency decreases with age
+
+CHI-SQUARE TEST RESULTS:
+------------------------------
+Chi-square statistic: 796.7315
+P-value: 1.07e-165
+Degrees of freedom: 9
+Cramér's V (effect size): 0.0623
+
+STATISTICAL DECISION:
+--------------------
+REJECT H₀ - Accept H₁
+Conclusion: Statistically significant evidence that alcohol consumption decreases with age
+
+Effect Size Interpretation: Negligible effect
+
+AGE PREDICTION MODEL IMPLICATIONS:
+-----------------------------------
+? Weak evidence for alcohol as an age predictor
