@@ -1,709 +1,605 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
 """
-Model Comparison System
+Model Comparison Script
 
-This script compares the performance of Gemini LLM predictions against
-the existing neural network models for age prediction.
+This script compares the performance of four age prediction models:
+1. Simple Model
+2. K-Fold Ensemble Model
+3. Enhanced Simple Model
+4. Enhanced K-Fold Ensemble Model
 
-Features:
-- Load and evaluate existing NN models
-- Compare LLM vs NN performance on same test sets
-- Statistical significance testing
-- Comprehensive performance analysis
+It creates visualizations for different comparison pairs and a comprehensive
+comparison of all models together.
 """
 
 import os
-import json
+import re
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Any, Optional
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import mean_absolute_error, r2_score
-from scipy import stats
-import torch
-import pickle
+from matplotlib.gridspec import GridSpec
 
-# Import the Gemini predictor and config
-from gemini_age_predictor import GeminiPredictor, run_experiment
-from gemini_config import *
+# Set style
+plt.style.use('seaborn-v0_8-whitegrid')
+sns.set_palette("colorblind")
 
+# Create directory for comparison results
+COMPARISON_DIR = "model_comparisons"
+os.makedirs(COMPARISON_DIR, exist_ok=True)
 
-class ModelComparison:
-    """
-    Class for comparing LLM predictions against existing neural network models.
-    """
-    
-    def __init__(self, results_dir: str = "model_comparison_results"):
-        """Initialize the model comparison system."""
-        self.results_dir = results_dir
-        os.makedirs(self.results_dir, exist_ok=True)
-        
-        # Storage for loaded models and results
-        self.nn_models = {}
-        self.nn_predictions = {}
-        self.llm_predictions = {}
-        self.test_data = None
-        
-    def load_nn_model_data(self, notebook_path: str = "Playing with Database.ipynb") -> Dict[str, Any]:
-        """
-        Load data and model architectures from the existing notebook.
-        
-        This function recreates the data preprocessing from your notebook
-        to ensure fair comparison on the same test set.
-        """
-        print("Loading data using notebook preprocessing...")
-        
-        # Load the same data as in notebook
-        try:
-            csv = pd.read_csv('data/user_data_public.csv', low_memory=False)
-            question_csv = pd.read_csv('data/question_data.csv', delimiter=';', low_memory=False)
-        except FileNotFoundError as e:
-            print(f"Error loading data: {e}")
-            print("Please ensure data files are in the correct location")
-            return None
-        
-        print(f"Loaded data: {csv.shape[0]} users, {csv.shape[1]} features")
-        
-        # Recreate the preprocessing from your notebook
-        # Filter to question columns with high response rates
-        question_cols = [col for col in csv.columns if col.startswith('q')]
-        
-        # Use the same filtering as in notebook - questions with >50k responses
-        if 'N' in question_csv.columns:
-            high_response_questions = question_csv[question_csv['N'] > 50000]
-            available_questions = [q for q in high_response_questions.index 
-                                 if q in csv.columns]
-        else:
-            # Fallback to questions with most responses
-            response_counts = csv[question_cols].notna().sum().sort_values(ascending=False)
-            available_questions = response_counts.head(100).index.tolist()
-        
-        print(f"Found {len(available_questions)} high-response questions")
-        
-        # Drop rows with NaN in selected question columns (same as notebook)
-        answerers = csv.dropna(subset=available_questions[:50])  # Use top 50 questions
-        
-        # Create the same one-hot encoded features as in notebook
-        answers_raw = answerers[available_questions[:50]]
-        answers_encoded = pd.get_dummies(answers_raw, columns=available_questions[:50])
-        
-        # Add age target
-        answers_encoded['d_age'] = answerers.loc[answers_encoded.index, 'd_age']
-        
-        # Clean data - same as notebook
-        clean_data = answers_encoded.dropna()
-        
-        X = clean_data.drop(columns='d_age')
-        y = clean_data['d_age']
-        
-        print(f"Clean dataset: {len(clean_data)} users, {X.shape[1]} features")
-        print(f"Age range: {y.min():.0f}-{y.max():.0f}, mean: {y.mean():.1f}")
-        
-        return {
-            'X': X,
-            'y': y,
-            'raw_data': csv,
-            'question_data': question_csv,
-            'selected_questions': available_questions[:50],
-            'clean_answerers': answerers
-        }
-    
-    def simulate_nn_performance(self, y_true: np.ndarray) -> Dict[str, np.ndarray]:
-        """
-        Simulate neural network performance based on the results from your notebook.
-        
-        From your notebook, the NN models achieved:
-        - Simple model: ~5.48 MAE
-        - Enhanced model: ~5.51 MAE  
-        - Best model: ~5.36 MAE
-        
-        This function creates realistic predictions with similar error patterns.
-        """
-        print("Simulating NN model performance based on notebook results...")
-        
-        n_samples = len(y_true)
-        mean_age = np.mean(y_true)
-        
-        # Simulate different NN model performances
-        models = {
-            'simple_nn': {
-                'mae_target': 5.48,
-                'bias': 0.5,  # Slight age underestimation bias
-                'noise_scale': 1.2
-            },
-            'enhanced_nn': {
-                'mae_target': 5.51, 
-                'bias': -0.2,  # Slight overestimation
-                'noise_scale': 1.1
-            },
-            'best_nn': {
-                'mae_target': 5.36,
-                'bias': 0.1,  # Minimal bias
-                'noise_scale': 1.0
-            }
-        }
-        
-        simulated_predictions = {}
-        
-        for model_name, params in models.items():
-            # Create predictions that approximate the target MAE
-            # Start with true values and add controlled noise
+# File paths for metrics
+SIMPLE_MODEL_PATH = "results/simple_voyageapi_embedding_model_accuracy.txt"
+KFOLD_MODEL_PATH = "results/k_fold_ensemble_accuracy.txt"
+ENHANCED_SIMPLE_MODEL_PATH = "enhanced_models_results/enhanced_simple_voyageapi_accuracy.txt"
+ENHANCED_KFOLD_MODEL_PATH = "enhanced_models_results/enhanced_k_fold_ensemble_accuracy.txt"
+
+def extract_metrics_from_file(file_path):
+    """Extract accuracy metrics from a file."""
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
             
-            # Base predictions with some regression toward mean
-            base_predictions = 0.8 * y_true + 0.2 * mean_age
+            # Extract model name from the first line if it exists
+            first_line = content.strip().split('\n')[0]
+            if "Accuracy Metrics" in first_line:
+                model_name = "Unnamed Model"
+            else:
+                model_name = first_line.strip().rstrip(':')
             
-            # Add bias
-            biased_predictions = base_predictions + params['bias']
+            # Extract MAE
+            mae_match = re.search(r'Mean Absolute Error: (\d+\.\d+)', content)
+            mae = float(mae_match.group(1)) if mae_match else None
             
-            # Add noise to reach target MAE
-            noise_std = params['mae_target'] * params['noise_scale'] * 0.6  # Approximate relationship
-            noise = np.random.normal(0, noise_std, n_samples)
-            final_predictions = biased_predictions + noise
+            # Extract accuracy within thresholds
+            within_1_match = re.search(r'Predictions within ±1 year: (\d+\.\d+)', content)
+            within_1 = float(within_1_match.group(1)) if within_1_match else None
             
-            # Clamp to reasonable age range
-            final_predictions = np.clip(final_predictions, 18, 100)
+            within_3_match = re.search(r'Predictions within ±3 years: (\d+\.\d+)', content)
+            within_3 = float(within_3_match.group(1)) if within_3_match else None
             
-            # Fine-tune to match exact MAE if needed
-            current_mae = mean_absolute_error(y_true, final_predictions)
-            adjustment = (params['mae_target'] - current_mae) * 0.5
-            final_predictions += np.random.normal(adjustment, 0.5, n_samples)
-            final_predictions = np.clip(final_predictions, 18, 100)
+            within_5_match = re.search(r'Predictions within ±5 years: (\d+\.\d+)', content)
+            within_5 = float(within_5_match.group(1)) if within_5_match else None
             
-            simulated_predictions[model_name] = final_predictions
+            # Extract R² score
+            r2_match = re.search(r'R² score: (\d+\.\d+)', content)
+            r2 = float(r2_match.group(1)) if r2_match else None
             
-            # Verify MAE
-            actual_mae = mean_absolute_error(y_true, final_predictions)
-            print(f"{model_name}: Target MAE = {params['mae_target']:.2f}, Actual MAE = {actual_mae:.2f}")
-        
-        return simulated_predictions
-    
-    def run_llm_comparison_experiment(self, test_data: pd.DataFrame, 
-                                    question_configs: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Run LLM experiments with different question configurations.
-        
-        Args:
-            test_data: DataFrame with test users
-            question_configs: List of question configuration dictionaries
-            
-        Returns:
-            Dictionary with all LLM experiment results
-        """
-        llm_results = {}
-        
-        print(f"Running LLM experiments on {len(test_data)} test users")
-        
-        for config in question_configs:
-            config_name = config.get('name', f"config_{len(llm_results)}")
-            print(f"\n=== Running LLM experiment: {config_name} ===")
-            
-            try:
-                # Initialize Gemini predictor
-                predictor = GeminiPredictor(
-                    api_key=config.get('api_key', GEMINI_API_KEY),
-                    model_name=config.get('model', 'gemini-1.5-flash')
-                )
-                
-                # Load data 
-                predictor.user_data = test_data
-                predictor.question_data = pd.read_csv(QUESTION_DATA_PATH, delimiter=';')
-                
-                # Select questions using specified method
-                predictor.select_questions(
-                    method=config.get('question_selection', 'high_response'),
-                    n_questions=config.get('n_questions', 30),
-                    custom_questions=config.get('custom_questions', None)
-                )
-                
-                print(f"Selected {len(predictor.selected_questions)} questions")
-                
-                # Make predictions
-                predictions = predictor.predict_batch(
-                    test_data, 
-                    target='d_age',
-                    batch_size=config.get('batch_size', 5),
-                    delay=config.get('delay', 1.0)
-                )
-                
-                # Evaluate
-                true_values = test_data['d_age'].values
-                metrics = predictor.evaluate_predictions(true_values, predictions, 'd_age')
-                
-                llm_results[config_name] = {
-                    'config': config,
-                    'predictions': predictions,
-                    'metrics': metrics,
-                    'selected_questions': predictor.selected_questions
-                }
-                
-            except Exception as e:
-                print(f"Error in LLM experiment {config_name}: {str(e)}")
-                llm_results[config_name] = {'error': str(e)}
-        
-        return llm_results
-    
-    def compare_all_models(self, test_data: pd.DataFrame, 
-                          llm_results: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Compare all models (NN simulations + LLM experiments) on the same test set.
-        
-        Args:
-            test_data: Test dataset
-            llm_results: Results from LLM experiments
-            
-        Returns:
-            Comprehensive comparison results
-        """
-        y_true = test_data['d_age'].values
-        
-        # Get NN simulated predictions
-        nn_predictions = self.simulate_nn_performance(y_true)
-        
-        # Organize all predictions
-        all_predictions = {}
-        all_metrics = {}
-        
-        # Add NN model results
-        for nn_model, predictions in nn_predictions.items():
-            mae = mean_absolute_error(y_true, predictions)
-            r2 = r2_score(y_true, predictions)
-            
-            abs_errors = np.abs(y_true - predictions)
-            within_1 = np.mean(abs_errors <= 1) * 100
-            within_3 = np.mean(abs_errors <= 3) * 100
-            within_5 = np.mean(abs_errors <= 5) * 100
-            
-            all_predictions[nn_model] = predictions
-            all_metrics[nn_model] = {
+            return {
+                'name': model_name,
                 'mae': mae,
-                'r2': r2,
                 'within_1_year': within_1,
                 'within_3_years': within_3,
                 'within_5_years': within_5,
-                'model_type': 'neural_network'
+                'r2_score': r2
             }
-        
-        # Add LLM results
-        for llm_config, results in llm_results.items():
-            if 'error' in results:
-                continue
-                
-            predictions = results['predictions']
-            # Filter valid predictions
-            valid_indices = [i for i, pred in enumerate(predictions) if pred is not None]
-            
-            if len(valid_indices) == 0:
-                print(f"Warning: No valid predictions for {llm_config}")
-                continue
-                
-            valid_true = y_true[valid_indices]  
-            valid_pred = np.array([predictions[i] for i in valid_indices])
-            
-            mae = mean_absolute_error(valid_true, valid_pred)
-            r2 = r2_score(valid_true, valid_pred) if len(valid_pred) > 1 else 0
-            
-            abs_errors = np.abs(valid_true - valid_pred)
-            within_1 = np.mean(abs_errors <= 1) * 100
-            within_3 = np.mean(abs_errors <= 3) * 100
-            within_5 = np.mean(abs_errors <= 5) * 100
-            
-            all_predictions[llm_config] = predictions
-            all_metrics[llm_config] = {
-                'mae': mae,
-                'r2': r2,
-                'within_1_year': within_1,
-                'within_3_years': within_3,
-                'within_5_years': within_5,
-                'model_type': 'llm',
-                'valid_prediction_rate': len(valid_indices) / len(predictions),
-                'config': results['config']
-            }
-        
-        # Statistical significance testing
-        significance_tests = self._perform_significance_tests(y_true, all_predictions)
-        
-        # Create results summary
-        comparison_results = {
-            'test_size': len(y_true),
-            'true_age_stats': {
-                'mean': np.mean(y_true),
-                'std': np.std(y_true),
-                'min': np.min(y_true),
-                'max': np.max(y_true)
-            },
-            'model_metrics': all_metrics,
-            'predictions': all_predictions,
-            'significance_tests': significance_tests,
-            'timestamp': pd.Timestamp.now().isoformat()
-        }
-        
-        return comparison_results
+    except Exception as e:
+        print(f"Error extracting metrics from {file_path}: {e}")
+        return None
+
+def calculate_improvement(baseline_value, new_value, higher_is_better=True):
+    """Calculate percentage improvement between two values."""
+    if baseline_value == 0:
+        return float('inf') if new_value > 0 else 0
     
-    def _perform_significance_tests(self, y_true: np.ndarray, 
-                                   predictions_dict: Dict[str, np.ndarray]) -> Dict[str, Any]:
-        """Perform statistical significance tests between models."""
-        significance_results = {}
+    if higher_is_better:
+        improvement = (new_value - baseline_value) / baseline_value * 100
+    else:
+        improvement = (baseline_value - new_value) / baseline_value * 100
         
-        # Get all valid prediction pairs
-        valid_predictions = {}
-        for name, preds in predictions_dict.items():
-            if isinstance(preds, list):
-                # LLM predictions - filter valid ones
-                valid_indices = [i for i, pred in enumerate(preds) if pred is not None]
-                if len(valid_indices) > 0:
-                    valid_predictions[name] = {
-                        'indices': valid_indices,
-                        'values': np.array([preds[i] for i in valid_indices])
-                    }
-            else:
-                # NN predictions - all valid
-                valid_predictions[name] = {
-                    'indices': list(range(len(preds))),
-                    'values': preds
-                }
-        
-        # Pairwise comparisons
-        model_names = list(valid_predictions.keys())
-        
-        for i, model1 in enumerate(model_names):
-            for j, model2 in enumerate(model_names[i+1:], i+1):
-                
-                # Find common valid indices
-                indices1 = set(valid_predictions[model1]['indices'])
-                indices2 = set(valid_predictions[model2]['indices'])
-                common_indices = list(indices1 & indices2)
-                
-                if len(common_indices) < 10:  # Need sufficient samples
-                    continue
-                
-                # Get predictions for common indices
-                true_common = y_true[common_indices]
-                pred1_common = valid_predictions[model1]['values']
-                pred2_common = valid_predictions[model2]['values']
-                
-                # Calculate errors
-                errors1 = np.abs(true_common - pred1_common[:len(common_indices)])
-                errors2 = np.abs(true_common - pred2_common[:len(common_indices)])
-                
-                # Perform paired t-test on absolute errors
-                try:
-                    stat, p_value = stats.ttest_rel(errors1, errors2)
-                    
-                    significance_results[f"{model1}_vs_{model2}"] = {
-                        'n_samples': len(common_indices),
-                        'mean_error_1': np.mean(errors1),
-                        'mean_error_2': np.mean(errors2), 
-                        't_statistic': stat,
-                        'p_value': p_value,
-                        'significant': p_value < 0.05,
-                        'effect_size': (np.mean(errors1) - np.mean(errors2)) / np.sqrt((np.var(errors1) + np.var(errors2)) / 2)
-                    }
-                except Exception as e:
-                    significance_results[f"{model1}_vs_{model2}"] = {'error': str(e)}
-        
-        return significance_results
+    return improvement
+
+def create_comparison_plot(model1, model2, metric_type, output_path=None):
+    """Create a comparison bar plot for two models on a specific metric."""
+    models = [model1['name'], model2['name']]
     
-    def create_comparison_visualizations(self, comparison_results: Dict[str, Any], 
-                                       save_dir: str = None) -> None:
-        """Create comprehensive visualizations comparing all models."""
-        save_dir = save_dir or self.results_dir
+    if metric_type == 'mae':
+        values = [model1['mae'], model2['mae']]
+        title = 'Mean Absolute Error Comparison'
+        ylabel = 'MAE (years)'
+        higher_is_better = False
+    elif metric_type == 'accuracy':
+        # For accuracy, we'll plot all threshold values
+        fig, ax = plt.subplots(1, 3, figsize=(18, 6))
         
-        metrics = comparison_results['model_metrics']
-        predictions = comparison_results['predictions']
-        y_true = None
+        # Within 1 year
+        ax[0].bar([0, 1], [model1['within_1_year'], model2['within_1_year']])
+        ax[0].set_xticks([0, 1])
+        ax[0].set_xticklabels(models)
+        ax[0].set_ylabel('Accuracy (%)')
+        ax[0].set_title('Predictions within ±1 year')
         
-        # Extract true values (they should be the same for all)
-        for name, preds in predictions.items():
-            if isinstance(preds, np.ndarray):
-                y_true = np.arange(len(preds))  # Placeholder - use actual y_true
-                break
+        # Within 3 years
+        ax[1].bar([0, 1], [model1['within_3_years'], model2['within_3_years']])
+        ax[1].set_xticks([0, 1])
+        ax[1].set_xticklabels(models)
+        ax[1].set_ylabel('Accuracy (%)')
+        ax[1].set_title('Predictions within ±3 years')
         
-        # 1. MAE Comparison Bar Plot
-        plt.figure(figsize=(15, 10))
-        
-        plt.subplot(2, 3, 1)
-        models = list(metrics.keys())
-        maes = [metrics[model]['mae'] for model in models]
-        colors = ['skyblue' if metrics[model]['model_type'] == 'neural_network' else 'lightcoral' for model in models]
-        
-        bars = plt.bar(range(len(models)), maes, color=colors)
-        plt.xlabel('Models')
-        plt.ylabel('Mean Absolute Error (years)')
-        plt.title('MAE Comparison: NN vs LLM')
-        plt.xticks(range(len(models)), models, rotation=45)
-        
-        # Add value labels on bars
-        for bar, mae in zip(bars, maes):
-            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.05,
-                    f'{mae:.2f}', ha='center', va='bottom')
-        
-        # 2. Accuracy Within Years Comparison
-        plt.subplot(2, 3, 2)
-        within_3_years = [metrics[model]['within_3_years'] for model in models]
-        
-        bars = plt.bar(range(len(models)), within_3_years, color=colors)
-        plt.xlabel('Models')
-        plt.ylabel('Accuracy within ±3 years (%)')
-        plt.title('Accuracy Comparison')
-        plt.xticks(range(len(models)), models, rotation=45)
-        
-        for bar, acc in zip(bars, within_3_years):
-            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
-                    f'{acc:.1f}%', ha='center', va='bottom')
-        
-        # 3. Model Performance Overview Table
-        plt.subplot(2, 3, 3)
-        plt.axis('off')
-        
-        # Create table data
-        table_data = []
-        headers = ['Model', 'Type', 'MAE', '±3yr Acc', 'Valid Rate']
-        
-        for model in models:
-            m = metrics[model]
-            row = [
-                model[:12],  # Truncate long names
-                'NN' if m['model_type'] == 'neural_network' else 'LLM',
-                f"{m['mae']:.2f}",
-                f"{m['within_3_years']:.1f}%",
-                f"{m.get('valid_prediction_rate', 1.0)*100:.1f}%" if 'valid_prediction_rate' in m else '100%'
-            ]
-            table_data.append(row)
-        
-        table = plt.table(cellText=table_data, colLabels=headers,
-                         cellLoc='center', loc='center')
-        table.auto_set_font_size(False)
-        table.set_fontsize(9)
-        table.scale(1, 1.5)
-        plt.title('Performance Summary', y=0.8)
-        
-        # 4. R² Comparison
-        plt.subplot(2, 3, 4)
-        r2_scores = [metrics[model]['r2'] for model in models]
-        
-        bars = plt.bar(range(len(models)), r2_scores, color=colors)
-        plt.xlabel('Models')
-        plt.ylabel('R² Score')
-        plt.title('R² Score Comparison')
-        plt.xticks(range(len(models)), models, rotation=45)
-        
-        for bar, r2 in zip(bars, r2_scores):
-            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.005,
-                    f'{r2:.3f}', ha='center', va='bottom')
-        
-        # 5. Significance Test Heatmap
-        plt.subplot(2, 3, 5)
-        if 'significance_tests' in comparison_results:
-            sig_tests = comparison_results['significance_tests']
-            
-            # Create significance matrix
-            model_pairs = []
-            p_values = []
-            
-            for test_name, results in sig_tests.items():
-                if 'p_value' in results:
-                    model_pairs.append(test_name.replace('_vs_', ' vs '))
-                    p_values.append(results['p_value'])
-            
-            if model_pairs:
-                # Simple visualization of p-values
-                bars = plt.bar(range(len(model_pairs)), [-np.log10(p) for p in p_values])
-                plt.axhline(-np.log10(0.05), color='red', linestyle='--', label='p=0.05')
-                plt.xlabel('Model Comparisons')
-                plt.ylabel('-log10(p-value)')
-                plt.title('Statistical Significance Tests')
-                plt.xticks(range(len(model_pairs)), model_pairs, rotation=45)
-                plt.legend()
-            else:
-                plt.text(0.5, 0.5, 'No significance tests available', 
-                        ha='center', va='center', transform=plt.gca().transAxes)
-                plt.title('Statistical Tests')
-        
-        # 6. Summary Statistics
-        plt.subplot(2, 3, 6)
-        plt.axis('off')
-        
-        # Find best performing models
-        best_mae_model = min(models, key=lambda x: metrics[x]['mae'])
-        best_acc_model = max(models, key=lambda x: metrics[x]['within_3_years'])
-        
-        best_nn = min([m for m in models if metrics[m]['model_type'] == 'neural_network'],
-                     key=lambda x: metrics[x]['mae'])
-        best_llm = None
-        llm_models = [m for m in models if metrics[m]['model_type'] == 'llm']
-        if llm_models:
-            best_llm = min(llm_models, key=lambda x: metrics[x]['mae'])
-        
-        summary_text = f"""Model Performance Summary
-        
-Best Overall MAE: {best_mae_model}
-    MAE: {metrics[best_mae_model]['mae']:.2f} years
-    
-Best Overall Accuracy: {best_acc_model}  
-    ±3yr Acc: {metrics[best_acc_model]['within_3_years']:.1f}%
-    
-Best Neural Network: {best_nn}
-    MAE: {metrics[best_nn]['mae']:.2f} years
-    
-Best LLM: {best_llm if best_llm else 'None'}"""
-        
-        if best_llm:
-            summary_text += f"\n    MAE: {metrics[best_llm]['mae']:.2f} years"
-            summary_text += f"\n\nNN vs LLM Difference:"
-            summary_text += f"\n    {metrics[best_nn]['mae'] - metrics[best_llm]['mae']:.2f} years"
-        
-        plt.text(0.05, 0.95, summary_text, transform=plt.gca().transAxes,
-                fontsize=10, verticalalignment='top', fontfamily='monospace')
+        # Within 5 years
+        ax[2].bar([0, 1], [model1['within_5_years'], model2['within_5_years']])
+        ax[2].set_xticks([0, 1])
+        ax[2].set_xticklabels(models)
+        ax[2].set_ylabel('Accuracy (%)')
+        ax[2].set_title('Predictions within ±5 years')
         
         plt.tight_layout()
         
-        if save_dir:
-            plt.savefig(os.path.join(save_dir, 'comprehensive_model_comparison.png'), 
-                       dpi=300, bbox_inches='tight')
+        if output_path:
+            plt.savefig(output_path)
+            plt.close()
+            
+        return
         
-        plt.show()
-    
-    def save_comparison_results(self, results: Dict[str, Any], filename: str = None) -> str:
-        """Save comprehensive comparison results."""
-        filename = filename or f"model_comparison_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.json"
-        filepath = os.path.join(self.results_dir, filename)
-        
-        # Convert numpy arrays to lists for JSON serialization
-        serializable_results = {}
-        for key, value in results.items():
-            if key == 'predictions':
-                # Handle predictions dictionary
-                serializable_predictions = {}
-                for model_name, preds in value.items():
-                    if isinstance(preds, np.ndarray):
-                        serializable_predictions[model_name] = preds.tolist()
-                    elif isinstance(preds, list):
-                        serializable_predictions[model_name] = preds
-                    else:
-                        serializable_predictions[model_name] = str(preds)
-                serializable_results[key] = serializable_predictions
-            elif isinstance(value, np.ndarray):
-                serializable_results[key] = value.tolist()
-            elif isinstance(value, (np.integer, np.floating)):
-                serializable_results[key] = value.item()
-            else:
-                serializable_results[key] = value
-        
-        with open(filepath, 'w') as f:
-            json.dump(serializable_results, f, indent=2, default=str)
-        
-        print(f"Comparison results saved to: {filepath}")
-        return filepath
-
-
-def run_full_comparison(gemini_api_key: str = None, sample_size: int = 200) -> Dict[str, Any]:
-    """
-    Run a complete comparison between LLM and NN models.
-    
-    Args:
-        gemini_api_key: Gemini API key for LLM experiments
-        sample_size: Number of users to test on
-        
-    Returns:
-        Complete comparison results
-    """
-    print("=== Starting Full Model Comparison ===")
-    
-    # Initialize comparison system
-    comparison = ModelComparison()
-    
-    # Load and prepare data
-    data_info = comparison.load_nn_model_data()
-    if data_info is None:
-        print("Failed to load data. Aborting comparison.")
-        return {}
-    
-    # Create test set
-    from sklearn.model_selection import train_test_split
-    
-    # Use clean data with age information
-    full_data = data_info['clean_answerers'].dropna(subset=['d_age'])
-    
-    if sample_size and len(full_data) > sample_size:
-        test_data = full_data.sample(sample_size, random_state=42)
+    elif metric_type == 'r2':
+        values = [model1['r2_score'], model2['r2_score']]
+        title = 'R² Score Comparison'
+        ylabel = 'R² Score'
+        higher_is_better = True
     else:
-        test_data = full_data
+        raise ValueError(f"Unknown metric type: {metric_type}")
     
-    print(f"Test dataset: {len(test_data)} users")
-    print(f"Age range: {test_data['d_age'].min():.0f}-{test_data['d_age'].max():.0f}")
+    plt.figure(figsize=(10, 6))
+    bars = plt.bar([0, 1], values)
     
-    # Define LLM experiment configurations
-    llm_configs = [
-        {
-            'name': 'llm_high_response_30q',
-            'api_key': gemini_api_key,
-            'model': 'gemini-1.5-flash',
-            'question_selection': 'high_response',
-            'n_questions': 30,
-            'batch_size': 5,
-            'delay': 1.0
-        },
-        {
-            'name': 'llm_age_predictive_20q',
-            'api_key': gemini_api_key,
-            'model': 'gemini-1.5-flash', 
-            'question_selection': 'age_predictive',
-            'n_questions': 20,
-            'batch_size': 5,
-            'delay': 1.0
-        },
-        {
-            'name': 'llm_high_response_15q',
-            'api_key': gemini_api_key,
-            'model': 'gemini-1.5-flash',
-            'question_selection': 'high_response', 
-            'n_questions': 15,
-            'batch_size': 8,
-            'delay': 0.8
-        }
+    # Add value annotations
+    for i, bar in enumerate(bars):
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                f'{values[i]:.4f}', ha='center', va='bottom')
+    
+    # Determine which model performs better and highlight it
+    if values[0] == values[1]:
+        # Values are equal, no highlighting
+        pass
+    elif (values[0] > values[1]) == higher_is_better:
+        # Model 1 is better
+        bars[0].set_color('green')
+        bars[1].set_color('lightgray')
+        improvement = calculate_improvement(values[1], values[0], higher_is_better)
+        plt.text(0, values[0] * 1.1, f"+{improvement:.2f}%" if improvement > 0 else f"{improvement:.2f}%", 
+                 ha='center', va='bottom', color='green', fontweight='bold')
+    else:
+        # Model 2 is better
+        bars[0].set_color('lightgray')
+        bars[1].set_color('green')
+        improvement = calculate_improvement(values[0], values[1], higher_is_better)
+        plt.text(1, values[1] * 1.1, f"+{improvement:.2f}%" if improvement > 0 else f"{improvement:.2f}%", 
+                 ha='center', va='bottom', color='green', fontweight='bold')
+    
+    plt.xticks([0, 1], models)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    if output_path:
+        plt.savefig(output_path)
+        plt.close()
+
+def create_comprehensive_comparison(models, output_path=None):
+    """Create a comprehensive comparison of all models."""
+    model_names = [model['name'] for model in models]
+    x = np.arange(len(model_names))
+    width = 0.15
+    
+    fig = plt.figure(figsize=(15, 12))
+    gs = GridSpec(3, 2, figure=fig)
+    
+    # MAE subplot
+    ax1 = fig.add_subplot(gs[0, :])
+    mae_values = [model['mae'] for model in models]
+    bars1 = ax1.bar(x, mae_values, width, label='MAE')
+    ax1.set_ylabel('MAE (years)')
+    ax1.set_title('Mean Absolute Error (lower is better)')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(model_names)
+    
+    # Add value annotations for MAE
+    for i, bar in enumerate(bars1):
+        height = bar.get_height()
+        ax1.annotate(f'{height:.2f}',
+                     xy=(bar.get_x() + bar.get_width()/2, height),
+                     xytext=(0, 3),
+                     textcoords="offset points",
+                     ha='center', va='bottom')
+    
+    # R² subplot
+    ax2 = fig.add_subplot(gs[1, :])
+    r2_values = [model['r2_score'] for model in models]
+    bars2 = ax2.bar(x, r2_values, width, label='R²', color='orange')
+    ax2.set_ylabel('R² Score')
+    ax2.set_title('R² Score (higher is better)')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(model_names)
+    
+    # Add value annotations for R²
+    for i, bar in enumerate(bars2):
+        height = bar.get_height()
+        ax2.annotate(f'{height:.4f}',
+                     xy=(bar.get_x() + bar.get_width()/2, height),
+                     xytext=(0, 3),
+                     textcoords="offset points",
+                     ha='center', va='bottom')
+    
+    # Accuracy within thresholds
+    ax3 = fig.add_subplot(gs[2, 0])
+    width = 0.25
+    within_1_values = [model['within_1_year'] for model in models]
+    within_3_values = [model['within_3_years'] for model in models]
+    within_5_values = [model['within_5_years'] for model in models]
+    
+    bars3_1 = ax3.bar(x - width, within_1_values, width, label='±1 year')
+    bars3_3 = ax3.bar(x, within_3_values, width, label='±3 years')
+    bars3_5 = ax3.bar(x + width, within_5_values, width, label='±5 years')
+    
+    ax3.set_ylabel('Accuracy (%)')
+    ax3.set_title('Prediction Accuracy within Thresholds')
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(model_names)
+    ax3.legend()
+    
+    # Add value annotations for accuracy thresholds
+    for bars, values in [(bars3_1, within_1_values), 
+                         (bars3_3, within_3_values), 
+                         (bars3_5, within_5_values)]:
+        for i, bar in enumerate(bars):
+            height = bar.get_height()
+            ax3.annotate(f'{height:.1f}%',
+                        xy=(bar.get_x() + bar.get_width()/2, height),
+                        xytext=(0, 3),
+                        textcoords="offset points",
+                        ha='center', va='bottom')
+    
+    # Summary table
+    ax4 = fig.add_subplot(gs[2, 1])
+    ax4.axis('tight')
+    ax4.axis('off')
+    
+    # Create a dataframe for the table
+    summary_data = {
+        'Model': model_names,
+        'MAE': mae_values,
+        'R²': r2_values,
+        '±1 year': [f"{v:.1f}%" for v in within_1_values],
+        '±3 years': [f"{v:.1f}%" for v in within_3_values],
+        '±5 years': [f"{v:.1f}%" for v in within_5_values]
+    }
+    summary_df = pd.DataFrame(summary_data)
+    
+    # Create table
+    table = ax4.table(cellText=summary_df.values, colLabels=summary_df.columns, 
+                      loc='center', cellLoc='center')
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.2, 1.5)
+    
+    ax4.set_title('Model Performance Summary')
+    
+    plt.tight_layout()
+    
+    if output_path:
+        plt.savefig(output_path)
+        plt.close()
+
+def create_pairwise_comparison_plots(models_dict):
+    """Create pairwise comparison plots between models."""
+    # Define the pairs to compare
+    comparison_pairs = [
+        ('simple', 'kfold', 'Simple vs K-Fold'),
+        ('simple', 'enhanced_simple', 'Simple vs Enhanced Simple'),
+        ('enhanced_simple', 'enhanced_kfold', 'Enhanced Simple vs Enhanced K-Fold'),
+        ('kfold', 'enhanced_kfold', 'K-Fold vs Enhanced K-Fold')
     ]
     
-    # Run LLM experiments
-    print("\n=== Running LLM Experiments ===")
-    llm_results = comparison.run_llm_comparison_experiment(test_data, llm_configs)
-    
-    # Perform complete comparison
-    print("\n=== Comparing All Models ===")
-    all_results = comparison.compare_all_models(test_data, llm_results)
-    
-    # Create visualizations
-    print("\n=== Creating Visualizations ===")
-    comparison.create_comparison_visualizations(all_results)
-    
-    # Save results
-    results_path = comparison.save_comparison_results(all_results)
-    
-    print(f"\n=== Comparison Complete ===")
-    print(f"Results saved to: {results_path}")
-    
-    return all_results
+    for model1_key, model2_key, title in comparison_pairs:
+        model1 = models_dict[model1_key]
+        model2 = models_dict[model2_key]
+        
+        # Update model names for better display
+        model1['name'] = model1_key.replace('_', ' ').title() + ' Model'
+        model2['name'] = model2_key.replace('_', ' ').title() + ' Model'
+        
+        # Create comparison directory
+        pair_dir = os.path.join(COMPARISON_DIR, f"{model1_key}_vs_{model2_key}")
+        os.makedirs(pair_dir, exist_ok=True)
+        
+        # Create MAE comparison
+        create_comparison_plot(
+            model1, model2, 'mae',
+            os.path.join(pair_dir, f"mae_comparison.png")
+        )
+        
+        # Create R² comparison
+        create_comparison_plot(
+            model1, model2, 'r2',
+            os.path.join(pair_dir, f"r2_comparison.png")
+        )
+        
+        # Create accuracy comparison
+        create_comparison_plot(
+            model1, model2, 'accuracy',
+            os.path.join(pair_dir, f"accuracy_comparison.png")
+        )
 
+def create_html_report(models_dict):
+    """Create an HTML report with all comparisons."""
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Age Prediction Models Comparison</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                line-height: 1.6;
+                margin: 0;
+                padding: 20px;
+                color: #333;
+            }
+            h1, h2, h3 {
+                color: #2c3e50;
+            }
+            table {
+                border-collapse: collapse;
+                width: 100%;
+                margin-bottom: 20px;
+            }
+            th, td {
+                padding: 12px 15px;
+                border: 1px solid #ddd;
+                text-align: center;
+            }
+            th {
+                background-color: #f2f2f2;
+                font-weight: bold;
+            }
+            tr:nth-child(even) {
+                background-color: #f9f9f9;
+            }
+            .section {
+                margin-bottom: 30px;
+                padding: 20px;
+                border-radius: 5px;
+                background-color: #fff;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            }
+            .comparison-images {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 20px;
+                margin-top: 20px;
+            }
+            .comparison-images img {
+                max-width: 100%;
+                height: auto;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .highlight-better {
+                color: green;
+                font-weight: bold;
+            }
+            .highlight-worse {
+                color: #d35400;
+            }
+            .full-width-image {
+                width: 100%;
+                max-width: 1000px;
+                margin: 20px auto;
+                display: block;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Age Prediction Models Comparison</h1>
+        
+        <div class="section">
+            <h2>Summary of All Models</h2>
+            <table>
+                <tr>
+                    <th>Model</th>
+                    <th>MAE (years) ↓</th>
+                    <th>R² Score ↑</th>
+                    <th>±1 year (%) ↑</th>
+                    <th>±3 years (%) ↑</th>
+                    <th>±5 years (%) ↑</th>
+                </tr>
+    """
+    
+    # Add model data to table
+    for key, model in models_dict.items():
+        model_name = key.replace('_', ' ').title() + ' Model'
+        html_content += f"""
+                <tr>
+                    <td>{model_name}</td>
+                    <td>{model['mae']:.2f}</td>
+                    <td>{model['r2_score']:.4f}</td>
+                    <td>{model['within_1_year']:.1f}%</td>
+                    <td>{model['within_3_years']:.1f}%</td>
+                    <td>{model['within_5_years']:.1f}%</td>
+                </tr>
+        """
+    
+    html_content += """
+            </table>
+            
+            <h3>Comprehensive Comparison</h3>
+            <img src="all_models_comparison.png" alt="All Models Comparison" class="full-width-image">
+        </div>
+    """
+    
+    # Add pairwise comparisons
+    comparison_pairs = [
+        ('simple', 'kfold', 'Simple vs K-Fold Model'),
+        ('simple', 'enhanced_simple', 'Simple vs Enhanced Simple Model'),
+        ('enhanced_simple', 'enhanced_kfold', 'Enhanced Simple vs Enhanced K-Fold Model'),
+        ('kfold', 'enhanced_kfold', 'K-Fold vs Enhanced K-Fold Model')
+    ]
+    
+    for model1_key, model2_key, title in comparison_pairs:
+        pair_dir_rel = f"{model1_key}_vs_{model2_key}"
+        
+        html_content += f"""
+        <div class="section">
+            <h2>{title}</h2>
+            
+            <h3>Performance Metrics Comparison</h3>
+            <div class="comparison-images">
+                <img src="{pair_dir_rel}/mae_comparison.png" alt="MAE Comparison">
+                <img src="{pair_dir_rel}/r2_comparison.png" alt="R² Comparison">
+            </div>
+            
+            <h3>Accuracy Within Thresholds</h3>
+            <img src="{pair_dir_rel}/accuracy_comparison.png" alt="Accuracy Comparison" class="full-width-image">
+        </div>
+        """
+    
+    html_content += """
+    </body>
+    </html>
+    """
+    
+    # Write HTML report
+    with open(os.path.join(COMPARISON_DIR, "model_comparison_report.html"), 'w') as f:
+        f.write(html_content)
 
-if __name__ == "__main__":
-    import argparse
+def create_markdown_report(models_dict):
+    """Create a markdown report with model comparisons."""
+    md_content = "# Age Prediction Models Comparison\n\n"
     
-    parser = argparse.ArgumentParser(description='Compare LLM vs NN models for age prediction')
-    parser.add_argument('--api_key', type=str, help='Gemini API key')
-    parser.add_argument('--sample_size', type=int, default=200, 
-                       help='Number of users to test on')
+    md_content += "## Summary of All Models\n\n"
     
-    args = parser.parse_args()
+    # Create markdown table
+    md_content += "| Model | MAE (years) ↓ | R² Score ↑ | ±1 year (%) ↑ | ±3 years (%) ↑ | ±5 years (%) ↑ |\n"
+    md_content += "| ----- | ------------ | ---------- | ------------- | -------------- | -------------- |\n"
     
-    # Run comparison
-    results = run_full_comparison(
-        gemini_api_key=args.api_key,
-        sample_size=args.sample_size
+    # Add model data to table
+    for key, model in models_dict.items():
+        model_name = key.replace('_', ' ').title() + ' Model'
+        md_content += f"| {model_name} | {model['mae']:.2f} | {model['r2_score']:.4f} | {model['within_1_year']:.1f}% | {model['within_3_years']:.1f}% | {model['within_5_years']:.1f}% |\n"
+    
+    md_content += "\n## Model Comparisons\n\n"
+    
+    # Add pairwise comparisons
+    comparison_pairs = [
+        ('simple', 'kfold', 'Simple vs K-Fold Model'),
+        ('simple', 'enhanced_simple', 'Simple vs Enhanced Simple Model'),
+        ('enhanced_simple', 'enhanced_kfold', 'Enhanced Simple vs Enhanced K-Fold Model'),
+        ('kfold', 'enhanced_kfold', 'K-Fold vs Enhanced K-Fold Model')
+    ]
+    
+    for model1_key, model2_key, title in comparison_pairs:
+        model1 = models_dict[model1_key]
+        model2 = models_dict[model2_key]
+        model1_name = model1_key.replace('_', ' ').title() + ' Model'
+        model2_name = model2_key.replace('_', ' ').title() + ' Model'
+        
+        md_content += f"### {title}\n\n"
+        
+        # Compare MAE
+        mae_diff = calculate_improvement(model1['mae'], model2['mae'], higher_is_better=False)
+        if model1['mae'] < model2['mae']:
+            mae_comparison = f"**{model1_name}** has a lower MAE ({model1['mae']:.2f} vs {model2['mae']:.2f}), making it **{abs(mae_diff):.2f}%** better."
+        elif model2['mae'] < model1['mae']:
+            mae_comparison = f"**{model2_name}** has a lower MAE ({model2['mae']:.2f} vs {model1['mae']:.2f}), making it **{abs(mae_diff):.2f}%** better."
+        else:
+            mae_comparison = f"Both models have the same MAE ({model1['mae']:.2f})."
+        
+        md_content += f"- **Mean Absolute Error**: {mae_comparison}\n"
+        
+        # Compare R²
+        r2_diff = calculate_improvement(model1['r2_score'], model2['r2_score'], higher_is_better=True)
+        if model1['r2_score'] > model2['r2_score']:
+            r2_comparison = f"**{model1_name}** has a higher R² score ({model1['r2_score']:.4f} vs {model2['r2_score']:.4f}), making it **{abs(r2_diff):.2f}%** better."
+        elif model2['r2_score'] > model1['r2_score']:
+            r2_comparison = f"**{model2_name}** has a higher R² score ({model2['r2_score']:.4f} vs {model1['r2_score']:.4f}), making it **{abs(r2_diff):.2f}%** better."
+        else:
+            r2_comparison = f"Both models have the same R² score ({model1['r2_score']:.4f})."
+        
+        md_content += f"- **R² Score**: {r2_comparison}\n"
+        
+        # Compare accuracy thresholds
+        for threshold, key in [('±1 year', 'within_1_year'), ('±3 years', 'within_3_years'), ('±5 years', 'within_5_years')]:
+            threshold_diff = calculate_improvement(model1[key], model2[key], higher_is_better=True)
+            if model1[key] > model2[key]:
+                threshold_comparison = f"**{model1_name}** has better accuracy {threshold} ({model1[key]:.1f}% vs {model2[key]:.1f}%), making it **{abs(threshold_diff):.2f}%** better."
+            elif model2[key] > model1[key]:
+                threshold_comparison = f"**{model2_name}** has better accuracy {threshold} ({model2[key]:.1f}% vs {model1[key]:.1f}%), making it **{abs(threshold_diff):.2f}%** better."
+            else:
+                threshold_comparison = f"Both models have the same accuracy {threshold} ({model1[key]:.1f}%)."
+            
+            md_content += f"- **Accuracy {threshold}**: {threshold_comparison}\n"
+        
+        md_content += "\n"
+    
+    md_content += "## Conclusion\n\n"
+    
+    # Find best model for each metric
+    best_mae = min(models_dict.items(), key=lambda x: x[1]['mae'])
+    best_r2 = max(models_dict.items(), key=lambda x: x[1]['r2_score'])
+    best_within_1 = max(models_dict.items(), key=lambda x: x[1]['within_1_year'])
+    best_within_3 = max(models_dict.items(), key=lambda x: x[1]['within_3_years'])
+    best_within_5 = max(models_dict.items(), key=lambda x: x[1]['within_5_years'])
+    
+    md_content += "Based on the comparison, here are the best models for each metric:\n\n"
+    md_content += f"- **Best MAE**: {best_mae[0].replace('_', ' ').title()} Model ({best_mae[1]['mae']:.2f} years)\n"
+    md_content += f"- **Best R² Score**: {best_r2[0].replace('_', ' ').title()} Model ({best_r2[1]['r2_score']:.4f})\n"
+    md_content += f"- **Best ±1 year Accuracy**: {best_within_1[0].replace('_', ' ').title()} Model ({best_within_1[1]['within_1_year']:.1f}%)\n"
+    md_content += f"- **Best ±3 years Accuracy**: {best_within_3[0].replace('_', ' ').title()} Model ({best_within_3[1]['within_3_years']:.1f}%)\n"
+    md_content += f"- **Best ±5 years Accuracy**: {best_within_5[0].replace('_', ' ').title()} Model ({best_within_5[1]['within_5_years']:.1f}%)\n\n"
+    
+    # Write markdown report
+    with open(os.path.join(COMPARISON_DIR, "model_comparison_report.md"), 'w') as f:
+        f.write(md_content)
+
+def main():
+    """Main function to run the model comparison."""
+    print("Extracting metrics from model files...")
+    
+    # Extract metrics from files
+    simple_model = extract_metrics_from_file(SIMPLE_MODEL_PATH)
+    kfold_model = extract_metrics_from_file(KFOLD_MODEL_PATH)
+    enhanced_simple_model = extract_metrics_from_file(ENHANCED_SIMPLE_MODEL_PATH)
+    enhanced_kfold_model = extract_metrics_from_file(ENHANCED_KFOLD_MODEL_PATH)
+    
+    # Organize models in a dictionary
+    models_dict = {
+        'simple': simple_model,
+        'kfold': kfold_model,
+        'enhanced_simple': enhanced_simple_model,
+        'enhanced_kfold': enhanced_kfold_model
+    }
+    
+    # Create pairwise comparison plots
+    print("Creating pairwise comparison plots...")
+    create_pairwise_comparison_plots(models_dict)
+    
+    # Create comprehensive comparison
+    print("Creating comprehensive comparison...")
+    all_models = [simple_model, kfold_model, enhanced_simple_model, enhanced_kfold_model]
+    for i, model_key in enumerate(['simple', 'kfold', 'enhanced_simple', 'enhanced_kfold']):
+        all_models[i]['name'] = model_key.replace('_', ' ').title() + ' Model'
+    
+    create_comprehensive_comparison(
+        all_models, 
+        os.path.join(COMPARISON_DIR, "all_models_comparison.png")
     )
     
-    if results and 'model_metrics' in results:
-        print("\n=== Final Results Summary ===")
-        for model_name, metrics in results['model_metrics'].items():
-            print(f"{model_name}: MAE = {metrics['mae']:.2f} years, "
-                  f"±3yr Acc = {metrics['within_3_years']:.1f}%")
+    # Create HTML report
+    print("Creating HTML report...")
+    create_html_report(models_dict)
+    
+    # Create markdown report
+    print("Creating markdown report...")
+    create_markdown_report(models_dict)
+    
+    print(f"Model comparison complete. Results saved to '{COMPARISON_DIR}' directory.")
+
+if __name__ == "__main__":
+    main()
