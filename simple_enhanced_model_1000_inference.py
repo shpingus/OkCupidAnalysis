@@ -11,7 +11,7 @@ Output: simple_enhanced_model_1000_predictions.csv with columns:
 - (empty): Sequential row number (0, 1, 2, ... 999)
 - index: Original user ID from dataset
 - real_age: True age from d_age column  
-- predicted_age: Model prediction
+- predicted_age: Model prediction (rounded to whole numbers)
 """
 
 import os
@@ -385,7 +385,7 @@ def main():
         '': range(len(predictions)),  # Sequential row index 0, 1, 2, ... 999 (empty column title)
         'index': valid_users['index'].values,
         'real_age': valid_users['d_age'].values,
-        'predicted_age': predictions
+        'predicted_age': np.round(predictions).astype(int)  # Round predictions to whole numbers
     })
     
     # Save results
