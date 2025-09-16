@@ -143,8 +143,8 @@ def load_data(data_path):
     if 'd_age' not in csv.columns:
         raise ValueError("Dataset must contain 'd_age' column for evaluation")
     
-    if 'index' not in csv.columns:
-        raise ValueError("Dataset must contain 'index' column for user identification")
+    if 'row_index' not in csv.columns:
+        raise ValueError("Dataset must contain 'row_index' column for user identification")
     
     # Process users with non-null age
     valid_users = csv.dropna(subset=['d_age'])
@@ -430,7 +430,7 @@ def main(args):
     print("\n6. Preparing output...")
     results_df = pd.DataFrame({
         '': range(len(predictions)),  # Sequential row index 0, 1, 2, ... 999 (empty column title)
-        'index': valid_users['index'].values,
+        'row_index': valid_users['row_index'].values,
         'real_age': valid_users['d_age'].values,
         'predicted_age': np.round(predictions).astype(int)  # Round predictions to whole numbers
     })
