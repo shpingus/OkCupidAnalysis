@@ -216,3 +216,5 @@ You can also examine the individual model results in their respective output dir
 To generate a new comparison report after running models:
 ```bash
 python model_comparison.py
+```
+
