@@ -216,25 +216,3 @@ You can also examine the individual model results in their respective output dir
 To generate a new comparison report after running models:
 ```bash
 python model_comparison.py
-```
-
-## Project Structure
-
-```
-OkCupidAnalysis/
-├── data/                              # Input data files
-│   ├── question_data.csv              # Question metadata
-│   └── user_data_public.csv           # User data
-├── model_comparisons/                 # Model comparison results
-│   ├── all_models_comparison.png      # Overall comparison
-│   ├── model_comparison_report.html   # Detailed comparison report
-│   ├── model_comparison_report.md     # Markdown version of report
-│   └── */                             # Pairwise comparison folders
-├── enhanced_models_results/           # Results from enhanced models
-├── not_enhanced_models_results/       # Results from basic models
-├── voyageai_age_simple_model.py       # Simple model implementation
-├── voyageai_age_k_fold_model.py       # K-fold ensemble model
-├── voyageai_age_enhanced_simple_model.py    # Enhanced simple model
-├── voyageai_age_enhanced_k_fold_model.py    # Enhanced k-fold model
-├── model_comparison.py                # Script for comparing models
-└── requirements.txt                   # Package dependencies
