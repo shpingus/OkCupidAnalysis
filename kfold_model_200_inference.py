@@ -2,24 +2,24 @@
 # -*- coding: utf-8 -*-
 
 """
-Simple Model 1000 Inference Script
+K-fold Ensemble Model 1000 Inference Script
 
-This script loads a trained simple age prediction model (enhanced or non-enhanced) 
-and generates predictions for 1000 user profiles from the data_for_report dataset.
+This script loads 5 trained k-fold age prediction models (enhanced or non-enhanced) 
+and generates ensemble predictions for 1000 user profiles from the data_for_report dataset.
 
 Usage:
-    python simple_model_1000_inference.py --model enhanced
-    python simple_model_1000_inference.py --model simple
+    python kfold_model_200_inference.py --model enhanced
+    python kfold_model_200_inference.py --model simple
 
 Output CSV files:
-- enhanced: simple_enhanced_model_1000_predictions.csv
-- simple: simple_model_1000_predictions.csv
+- enhanced: k_fold_enhanced_model_200_predictions.csv
+- simple: k_fold_model_200_predictions.csv
 
 Columns:
 - (empty): Sequential row number (0, 1, 2, ... 999)
 - index: Original user ID from dataset
 - real_age: True age from d_age column  
-- predicted_age: Model prediction (rounded to whole numbers)
+- predicted_age: Ensemble prediction (rounded to whole numbers)
 """
 
 import os
@@ -354,49 +354,93 @@ def create_enhanced_features(demographic_embeddings, question_embeddings):
     return enhanced_features
 
 
-def load_trained_model(model_path, input_size, device):
-    """Load the trained model from file."""
-    print(f"Loading trained model from {model_path}")
+def load_k_fold_models(model_paths, input_size, device):
+    """Load all 5 k-fold models for ensemble prediction."""
+    models = []
     
-    # Initialize model with correct input size
-    model = EnhancedAgePredictor(input_size).to(device)
+    for i, model_path in enumerate(model_paths, 1):
+        print(f"Loading k-fold model {i}/5: {model_path}")
+        
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+        
+        # Initialize model with correct input size
+        model = EnhancedAgePredictor(input_size).to(device)
+        
+        # Load trained weights
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        model.eval()
+        
+        models.append(model)
     
-    # Load trained weights
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
+    print(f"Successfully loaded {len(models)} k-fold models")
+    return models
+
+
+def ensemble_predict(models, X, device):
+    """Generate ensemble predictions by averaging outputs from all k-fold models."""
+    print("Generating ensemble predictions...")
     
-    print(f"Model loaded successfully with input size: {input_size}")
-    return model
+    all_predictions = []
+    
+    # Get predictions from each model
+    for i, model in enumerate(models, 1):
+        print(f"Getting predictions from model {i}/{len(models)}")
+        predictions = model.predict(X)
+        all_predictions.append(predictions)
+    
+    # Convert to numpy array for easier manipulation
+    all_predictions = np.array(all_predictions)  # Shape: (5, num_samples)
+    
+    # Calculate ensemble prediction by averaging
+    ensemble_predictions = np.mean(all_predictions, axis=0)
+    
+    print(f"Ensemble predictions shape: {ensemble_predictions.shape}")
+    print(f"Individual model predictions shape: {all_predictions.shape}")
+    
+    return ensemble_predictions
 
 
 def main(args):
-    """Main execution flow for inference."""
+    """Main execution flow for k-fold ensemble inference."""
     # Setup environment
     device = setup_environment()
     
-    # Configure model path and output based on argument
+    # Configure model paths and output based on argument
     data_path = "data/data_for_report/profiles_for_processing.csv"
     cache_dir = "cache"
     embedding_model = "voyage-2"
     
     # Create output directory if it doesn't exist
-    output_dir = "models_1000_predictions"
+    output_dir = "models_200_predictions"
     os.makedirs(output_dir, exist_ok=True)
     
     if args.model == "enhanced":
-        model_path = "enhanced_models_results/enhanced_simple_voyageapi_embedding_model.pth"
-        output_path = os.path.join(output_dir, "simple_enhanced_model_1000_predictions.csv")
-        model_type = "Enhanced Simple"
+        model_paths = [
+            "enhanced_models_results/1_enhanced_k_fold_model.pth",
+            "enhanced_models_results/2_enhanced_k_fold_model.pth",
+            "enhanced_models_results/3_enhanced_k_fold_model.pth",
+            "enhanced_models_results/4_enhanced_k_fold_model.pth",
+            "enhanced_models_results/5_enhanced_k_fold_model.pth"
+        ]
+        output_path = os.path.join(output_dir, "k_fold_enhanced_model_200_predictions.csv")
+        model_type = "Enhanced K-fold Ensemble"
     elif args.model == "simple":
-        model_path = "not_enhanced_models_results/simple_voyageapi_embedding_model.pth"
-        output_path = os.path.join(output_dir, "simple_model_1000_predictions.csv")
-        model_type = "Simple"
+        model_paths = [
+            "not_enhanced_models_results/1_k_fold_voyageapi_embedding_model.pth",
+            "not_enhanced_models_results/2_k_fold_voyageapi_embedding_model.pth",
+            "not_enhanced_models_results/3_k_fold_voyageapi_embedding_model.pth",
+            "not_enhanced_models_results/4_k_fold_voyageapi_embedding_model.pth",
+            "not_enhanced_models_results/5_k_fold_voyageapi_embedding_model.pth"
+        ]
+        output_path = os.path.join(output_dir, "k_fold_model_200_predictions.csv")
+        model_type = "K-fold Ensemble"
     else:
         raise ValueError(f"Invalid model type: {args.model}. Use 'enhanced' or 'simple'")
     
     print(f"=== {model_type} Model 1000 Inference ===")
     print(f"Input data: {data_path}")
-    print(f"Model: {model_path}")
+    print(f"Models: {len(model_paths)} k-fold models")
     print(f"Output: {output_path}")
     
     # Load and prepare data
@@ -417,14 +461,14 @@ def main(args):
     else:  # simple model
         X = create_basic_features(demographic_embeddings, question_embeddings)
     
-    # Load trained model
-    print("\n4. Loading trained model...")
+    # Load k-fold models
+    print("\n4. Loading k-fold models...")
     input_size = X.shape[1]
-    model = load_trained_model(model_path, input_size, device)
+    models = load_k_fold_models(model_paths, input_size, device)
     
-    # Generate predictions
-    print("\n5. Generating predictions...")
-    predictions = model.predict(X)
+    # Generate ensemble predictions
+    print("\n5. Generating ensemble predictions...")
+    predictions = ensemble_predict(models, X, device)
     
     # Prepare output data
     print("\n6. Preparing output...")
@@ -455,7 +499,7 @@ def main(args):
     print("\n=== Sample Predictions ===")
     print(results_df.head(10).to_string(index=False))
     
-    print(f"\nInference completed successfully!")
+    print(f"\nK-fold ensemble inference completed successfully!")
     print(f"Output saved to: {output_path}")
     
     return results_df
@@ -463,7 +507,7 @@ def main(args):
 
 if __name__ == "__main__":
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Simple Model 1000 Inference Script')
+    parser = argparse.ArgumentParser(description='K-fold Ensemble Model 1000 Inference Script')
     parser.add_argument('--model', type=str, choices=['enhanced', 'simple'], required=True,
                         help='Model type to use: "enhanced" or "simple"')
     
